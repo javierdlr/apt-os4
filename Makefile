@@ -14,4 +14,4 @@ $(apt): $(source_files:.cpp=.o)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(apt)
+	rm -f $(apt) repositoryManager.o repository.o ar.o main.o
