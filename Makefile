@@ -1,17 +1,27 @@
+.PHONY: all
+
 CXX = ppc-amigaos-g++
 CXXFLAGS = -std=c++11 -gstabs -mcrt=clib4 -Wall
 LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lssl -lcrypto -lbrotlidec -lbrotlicommon -lnghttp2 -lidn2 -lunistring -lpthread -lz -lauto
 
+OBJ=build/
+SRC=src/
+INCLUDE=include/
+OBJS=$(patsubst src/%.cpp, build/%.o, $(wildcard $(SRC)*.cpp))
+$(info $(OBJ))
+
 apt = apt
-source_files = repositoryManager.cpp repository.cpp ar.cpp main.cpp
 
-all: $(apt)
+all: build_dir $(apt)
 
-$(apt): $(source_files:.cpp=.o)
-	$(CXX) $(CXXFLAGS) -o $(apt) $^ $(LDFLAGS)
+$(apt): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o build/$(apt) $(OBJS) $(LDFLAGS)
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
+$(OBJ)%.o : $(SRC)%.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+build_dir:
+	mkdir -p build
 
 clean:
-	rm -f $(apt) repositoryManager.o repository.o ar.o main.o
+	rm -f build/*
