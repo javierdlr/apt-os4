@@ -16,4 +16,7 @@ public:
     std::string sha256;
     std::string section;
     std::string description;
+
+    // Fields used to handle operations quickly
+    std::string baseUrl;
 };

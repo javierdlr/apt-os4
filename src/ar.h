@@ -1,6 +1,10 @@
 #include <string>
+#include <iostream>
+
+#include <archive.h>
+#include <archive_entry.h>
 
 class ArExtractor {
     public:
-        bool extract(std::string source, std::string destination);
+        bool extract(const std::string& filename, const std::string& outputDir);
 };

@@ -1,8 +1,8 @@
 .PHONY: all
 
 CXX = ppc-amigaos-g++
-CXXFLAGS = -std=c++11 -gstabs -mcrt=clib4 -Wall
-LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lssl -lcrypto -lbrotlidec -lbrotlicommon -lnghttp2 -lidn2 -lunistring -lpthread -lz -lauto
+CXXFLAGS = -std=c++14 -gstabs -mcrt=clib4 -Wall
+LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lssl -lcrypto -lbrotlidec -lbrotlicommon -lnghttp2 -lpsl -lidn2 -lunistring -lpthread -larchive -llz4 -lbz2 -lz -lauto
 
 OBJ=build/
 SRC=src/

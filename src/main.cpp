@@ -1,9 +1,10 @@
 #include <iostream>
 #include <getopt.h>
 #include <cstdlib>
-#include <sys/stat.h>
+#include <cctype>
 
 #include "apt.h"
+#include "stringutils.h"
 #include "repositoryManager.h"
 
 APT apt;
@@ -21,45 +22,30 @@ int main(int argc, char *argv[]) {
     int remove_flag = 0;
     int search_flag = 0;
     int update_flag = 0;
-    RepositoryManager repository;
-    struct stat st;
+    RepositoryManager repositoryManager;
+    std::string filename = APT_SOURCE_LIST;
 
     // Long options structure
     static struct option long_options[] = {
-        {"search", required_argument, 0, 's'},
-        {"install", required_argument, 0, 'i'},
-        {"remove", required_argument, 0, 'r'},
-        {"update", no_argument, 0, 'u'},
-        {"ignorepeers", no_argument, 0, 'p'},
-        {0, 0, 0, 0}
+            {"search",      required_argument, 0, 's'},
+            {"install",     required_argument, 0, 'i'},
+            {"remove",      required_argument, 0, 'r'},
+            {"update",      no_argument,       0, 'u'},
+            {"ignorepeers", no_argument,       0, 'p'},
+            {"verbose",     no_argument,       0, 'v'},
+            {"help",        no_argument,       0, 'h'},
+            {0,             0,                 0, 0}
     };
 
-    int option_index = 0;
     apt.verbose(false);
     apt.ignorePeers(false);
 
-    // Check for directory structure
-    if (stat(APT_ASSIGN, &st) != 0) {
-        error("APT assign is not present!\n");
+    if (!apt.createDirs()) {
         exit(EXIT_FAILURE);
     }
 
-    if (stat(APT_LISTS, &st) != 0) {
-        if (mkdir(APT_LISTS, 0700) != 0) {
-            error("Cannot create lists directory!\n");
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    if (stat(APT_PACKAGES, &st) != 0) {
-        if (mkdir(APT_PACKAGES, 0700) != 0) {
-            error("Cannot create packages directory!\n");
-            exit(EXIT_FAILURE);
-        }
-    }
-
     // Parse command-line options
-    while ((opt = getopt_long(argc, argv, "s:i:r:u:v:p:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "s:i:r:u:v:p:", long_options, NULL)) != EOF) {
         switch (opt) {
             case 's':
                 search_term = optarg;
@@ -69,14 +55,18 @@ int main(int argc, char *argv[]) {
                 search_flag = 1;
                 break;
             case 'i':
-                package_name = optarg;
+                if (!package_name.empty())
+                    package_name += " ";
+                package_name += optarg;
                 if (package_name.empty()) {
                     error("Install: <package> is required");
                 }
                 install_flag = 1;
                 break;
             case 'r':
-                package_name = optarg;
+                if (!package_name.empty())
+                    package_name += " ";
+                package_name += optarg;
                 if (package_name.empty()) {
                     error("Remove: <package> is required");
                 }
@@ -87,10 +77,13 @@ int main(int argc, char *argv[]) {
                 break;
             case 'v':
                 apt.verbose(true);
-                break;       
+                break;
             case 'p':
                 apt.ignorePeers(true);
-                break;       
+                break;
+            case 'h':
+                error(APT_USAGE);
+                break;
             default:
                 error(APT_USAGE);
         }
@@ -104,45 +97,38 @@ int main(int argc, char *argv[]) {
         error("Only one option can be provided.");
     }
 
-    std::string filename = "sources.list";
-    if (!repository.readRepositoryFile(filename)) {
-        exit(EXIT_FAILURE);
+    if (!repositoryManager.readRepositoryFile(filename)) {
+        error("Cannot find " + filename + " file");
     }
 
     if (update_flag) {
-        std::vector<Repository> package = repository.downloadPackages();
-        // Display downloaded package information
-        for (const auto& package : repository.packageList()) {
-            /*
-            std::cout << "Name: " << package.name << std::endl;
-            std::cout << "Version: " << package.version << std::endl;
-            std::cout << "Architecture: " << package.architecture << std::endl;
-            std::cout << "Maintainer: " << package.maintainer << std::endl;
-            std::cout << "Depends: ";
-            for (const auto& depend : package.depends) {
-                std::cout << depend << ", ";
+        std::vector <Repository> repository = repositoryManager.downloadPackages();
+        std::vector <Package> packagesToUpdate;
+        // Check packages to update (if any)
+        for (const auto &package: repositoryManager.packageList()) {
+            if (repositoryManager.checkPackage(package)) {
+                std::cout << "Package " << package.name << " needs to be updated" << std::endl;
+                packagesToUpdate.push_back(package);
+            } else {
+                std::cout << "Package " << package.name << " not found or already updated" << std::endl;
             }
-            std::cout << std::endl;
-            std::cout << "Filename: " << package.filename << std::endl;
-            std::cout << "Size: " << package.size << std::endl;
-            std::cout << "MD5sum: " << package.md5sum << std::endl;
-            std::cout << "SHA1: " << package.sha1 << std::endl;
-            std::cout << "SHA256: " << package.sha256 << std::endl;
-            std::cout << "Section: " << package.section << std::endl;
-            std::cout << "Description: " << package.description << std::endl;
-            std::cout << std::endl;
-            */
         }
-    }
-    else {
+        if (packagesToUpdate.size() > 0) {
+            // Update packages
+        }
+    } else if (install_flag) {
+        std::string packagesToInstall = package_name.erase(package_name.find_last_not_of(" \n\r\t") + 1);
+        std::cout << "Installing '" << packagesToInstall << "'" << std::endl;
+        repositoryManager.installPackages(packagesToInstall);
+    } else if (search_flag) {
         // Perform actions based on the specified parameters
         if (!search_term.empty()) {
             std::cout << "Performing search action with term: " << search_term << "\n";
             // Add code for search action
-        }
-        if (!package_name.empty()) {
-            std::cout << "Performing install action for package: " << package_name << "\n";
-            // Add code for install action
+            std::vector <Package> packagesFound = repositoryManager.searchPackages(StringUtils::tolower(search_term));
+            for (const auto &p: packagesFound) {
+                std::cout << p.name << "/" << p.version << std::endl << "\t" << p.description << std::endl;
+            }
         }
     }
 

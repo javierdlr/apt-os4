@@ -56,9 +56,6 @@ bool RepositoryManager::saveRepository(std::string name, std::string content) {
 }
 
 std::vector<Repository> RepositoryManager::downloadPackages() {
-    // Parse the response
-    std::string line;
-    Package package;
     // Buffer to store downloaded data
     std::stringstream response;
     std::vector<Repository> result;
@@ -69,23 +66,24 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
         return result;
     }
 
+    // Set buffer to store response
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
     // Set callback function to write data
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
 
-    // Set buffer to store response
     if (getenv("CURL_VERBOSE") != NULL)
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     if (apt.ignorePeers())        
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0); // Skip SSL Verification
 
     for (const auto& repository : repositories) {
+        std::string line;
+        Package package;
         Repository rep;
         std::string inRelease = repository.baseUrl +  "/InRelease";
         std::string packagesFile = repository.baseUrl +  "/main/binary-amd64/Packages";
         
-
         // Download inRelease
         curl_easy_setopt(curl, CURLOPT_URL, inRelease.c_str());
         // Perform the request
@@ -181,4 +179,214 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
 
     }
     return result;
+}
+
+bool RepositoryManager::checkPackage(Package newPackage) {
+    std::string packageName = APT_PACKAGES + newPackage.name;
+    std::string line;
+    bool ret = false;
+    struct stat st;
+
+    if (stat(packageName.c_str(), &st) == 0) {
+        std::ifstream infile (packageName);
+        if (!infile)
+            return false;
+
+        while (std::getline(infile, line)) {
+            std::istringstream iss(line);
+
+            if (!line.empty()) {
+                size_t pos = line.find(':');
+                if (pos != std::string::npos) {
+                    std::string key = line.substr(0, pos);
+                    std::string value = line.substr(pos + 1);
+                    // Trim leading/trailing whitespaces
+                    key.erase(0, key.find_first_not_of(" \t"));
+                    key.erase(key.find_last_not_of(" \t") + 1);
+                    value.erase(0, value.find_first_not_of(" \t"));
+                    value.erase(value.find_last_not_of(" \t") + 1);
+                    // Assign values to package object
+                    if (key == "SHA1") {
+                        if (newPackage.sha1 != value) {
+                            ret = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        infile.close();
+     }
+     return ret;
+}
+
+std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
+    DIR *dir;
+    struct dirent *ent;
+    std::vector<Package> packagesFound;
+
+    if ((dir = opendir (APT_LISTS)) != NULL) {
+        /* print all the files and directories within directory */
+        while ((ent = readdir (dir)) != NULL) {
+            std::string fileName = std::string(ent->d_name);
+            if (!endsWith(fileName, "_Packages"))
+                continue;
+            std::ifstream infile (fileName);
+            if (!infile)
+                continue;
+
+            Package package;
+            std::string line;
+
+            while (std::getline(infile, line)) {
+                // Check if the line starts with "Package:"
+                if (line.find("Package:") == 0) {
+                    // Add package if searchTerm is found
+                    if (package.name.size() > 0 && package.name.find(searchTerm) != std::string::npos) {
+                        package.baseUrl = StringUtils::replace(fileName, "_Packages", "");
+                        package.baseUrl = StringUtils::replaceAll(package.baseUrl, "_", "/");
+                        std::vector<std::string> parts = StringUtils::split(package.baseUrl, "/");
+                        if (!parts.empty())
+                            package.baseUrl = parts[0] + "/" + parts[1];
+                        packagesFound.push_back(package);
+                    }
+                    // Clear package object
+                    package = Package();
+                    // Extract package name
+                    package.name = StringUtils::tolower(line.substr(9)); // Skip "Package: "
+                } else if (!line.empty()) {
+                    // Parse other fields
+                    size_t pos = line.find(':');
+                    if (pos != std::string::npos) {
+                        std::string key = line.substr(0, pos);
+                        std::string value = line.substr(pos + 1);
+                        // Trim leading/trailing whitespaces
+                        key.erase(0, key.find_first_not_of(" \t"));
+                        key.erase(key.find_last_not_of(" \t") + 1);
+                        value.erase(0, value.find_first_not_of(" \t"));
+                        value.erase(value.find_last_not_of(" \t") + 1);
+                        // Get only description
+                        if (key == "Description") {
+                            package.description = value;
+                        }
+                        else if (key == "Version") {
+                            package.version = value;
+                        } else if (key == "Filename") {
+                            package.filename = value;
+                        }
+                    }
+                }
+            }
+            // Add last package if searchTerm is found
+            if (package.name.size() > 0 && package.name.find(searchTerm) != std::string::npos) {
+                packagesFound.push_back(package);
+            }
+        }
+        closedir (dir);
+    }
+    return packagesFound;
+
+}
+
+std::vector<Package> RepositoryManager::installPackages(std::string packages) {
+    std::vector<std::string> packagesToInstall = StringUtils::split(packages, ",");
+    std::vector<Package> packagesInstalled;
+    for (const auto& package : packagesToInstall) {
+        std::vector<Package> packagesFound = searchPackages(package);
+        if (!packagesFound.empty()) {
+            // Get first package found - TODO - what if there are multiple files in repositories?
+            Package p = packagesFound.front();
+            // Create URL from baseUrl
+            std::string url = "https://" + p.baseUrl + "/" + p.filename;
+            // Create filename to save
+            std::string filename = p.filename.substr(p.filename.find_last_of("/\\") + 1);
+            std::string outputFile = std::string(APT_PACKAGES) + filename;
+            std::string outputDir = std::string(APT_TEMPDIR) + "/"  + p.filename + "/";
+            // Download file
+            std::cout << "Save file to " << outputFile << std::endl;
+            if (downloadFile(url, outputFile)) {
+                std::cout << filename << " downloaded" << std::endl;
+                // Install file
+                ArExtractor extractor;
+                // Extract the .deb file to temporary dir
+                std::cout << "Extract " << outputFile << " to " << outputDir << ".. " << std::flush;
+                if (extractor.extract(outputFile, outputDir) == 0) {
+                    // File is extracted. Now extract the package
+                    std::cout << "Done. \nNow extracting files.. " << std::flush;
+                    std::string commandName = "xz " + outputDir + "data.tar.xz
+                    if (system("xz -d outputDir + "data.tar.xz", APT_TEMPFILES_DIR) == 0) {
+                        std::cout << "Done. \nInstalling files.. " << std::flush;
+                        // Now the tricky part. We have to avoid to use /usr/ppc-amigaos because on OS4 we have SDK: define
+                    }
+                    else {
+                        std::cout << "Failed!" << std::endl;
+                        // remove the .deb file since it is not installed
+                        std::remove(outputFile.c_str());
+                        std::remove(outputDir.c_str());
+                    }
+                }
+                else {
+                    std::cout << "Failed!" << std::endl;
+                    // remove the .deb file since it is not installed
+                    std::remove(outputFile.c_str());
+                }
+            }
+            else
+                std::cout << "Error downloading " << url << std::endl;
+        }
+        else {
+            std::cout << package << " not found" << std::endl;
+        }
+    }
+
+    return packagesInstalled;
+}
+
+bool RepositoryManager::downloadFile(const std::string& url, const std::string& filename) {
+    curl_global_init(CURL_GLOBAL_ALL);
+    // Initialize libcurl easy handle
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "Failed to initialize libcurl." << std::endl;
+        return false;
+    }
+
+    if (getenv("CURL_VERBOSE") != NULL)
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+    if (apt.ignorePeers())
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0); // Skip SSL Verification
+
+    // Open the output file
+    FILE *file = fopen(filename.c_str(), "wb");
+    if (!file) {
+        std::cerr << "Failed to open file for writing." << std::endl;
+        curl_easy_cleanup(curl);
+        return false;
+    }
+
+    // Set URL to download
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+
+    // Set the file handle as the target for the transfer
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
+
+    // disable progress meter, set to 0L to enable it
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
+
+    // Perform the request
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        std::cerr << "Failed to download file: " << curl_easy_strerror(res) << std::endl;
+        curl_easy_cleanup(curl);
+        fclose(file);
+        return false;
+    }
+
+    // Close the file and cleanup
+    curl_easy_cleanup(curl);
+    fclose(file);
+
+    return true;
 }
