@@ -1,24 +1,30 @@
 .PHONY: all
 
 CXX = ppc-amigaos-g++
-CXXFLAGS = -std=c++14 -gstabs -mcrt=clib4 -Wall
-LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lssl -lcrypto -lbrotlidec -lbrotlicommon -lnghttp2 -lpsl -lidn2 -lunistring -lpthread -larchive -llz4 -lbz2 -lz -lauto
+CC = ppc-amigaos-gcc
+OPTIMIZE = -O3 -mstrict-align
+CXXFLAGS = -std=c++17 -gstabs -mcrt=clib4 -Wall -fpermissive $(OPTIMIZE)
+CFLAGS = -gstabs -mcrt=clib4 -Wall $(OPTIMIZE)
+LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lbrotlidec -lbrotlicommon -lnghttp2 -lrtmp -lssl -lcrypto  -lpsl -lidn2 -lunistring -lpthread -larchive -llz4 -llzma -lbz2 -lz -latomic -lauto 
 
 OBJ=build/
 SRC=src/
 INCLUDE=include/
-OBJS=$(patsubst src/%.cpp, build/%.o, $(wildcard $(SRC)*.cpp))
-$(info $(OBJ))
+CPP_OBJS=$(patsubst src/%.cpp, build/%.o, $(wildcard $(SRC)*.cpp))
+C_OBJS=$(patsubst src/%.c, build/%.o, $(wildcard $(SRC)*.c))
 
 apt = apt
 
 all: build_dir $(apt)
 
-$(apt): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o build/$(apt) $(OBJS) $(LDFLAGS)
+$(apt): $(CPP_OBJS) $(C_OBJS)
+	$(CXX) $(CXXFLAGS) -o build/$(apt) $(CPP_OBJS) $(C_OBJS) $(LDFLAGS)
 
 $(OBJ)%.o : $(SRC)%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OBJ)%.o : $(SRC)%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 build_dir:
 	mkdir -p build

@@ -11,6 +11,7 @@
 #define APT_TEMPFILES_DIR "T:apt/files/"
 #define APT_PACKAGES "APT:packages/"
 #define APT_SOURCE_LIST "APT:sources.list"
+#define SDK_DIR "SDK:"
 
 #define APT_USAGE "Usage: apt [--update|--search <term>|--install <package>|--remove <package>|--verbose|--ignorepeers|--help]"
 

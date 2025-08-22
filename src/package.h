@@ -19,4 +19,7 @@ public:
 
     // Fields used to handle operations quickly
     std::string baseUrl;
+
+    // Field used to check if it is installed or not
+    bool installed = false;
 };

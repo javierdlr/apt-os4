@@ -35,7 +35,6 @@ bool RepositoryManager::readRepositoryFile(std::string path) {
                 rep.name = replaceAll(repository, "https://", "");
                 rep.name = replaceAll(rep.name, "/", "_");
                 repositories.push_back(rep); // Store URL in vector
-                std::cout << "Repository: URL: " << rep.baseUrl << ", Name: " << rep.name  << std::endl;
             }
         }
     }
@@ -117,6 +116,9 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
         saveRepository(APT_LISTS + repository.name + "_main_binary-amd64_Packages", rep.packages);
 
         while (std::getline(stream, line)) {
+            // Skip empty lines
+            if (line.empty()) continue;
+
             // Check if the line starts with "Package:"
             if (line.find("Package:") == 0) {
                 // If package is not empty, add it to the vector
@@ -172,7 +174,7 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
         if (!package.name.empty()) {
             packages.push_back(package);
         }
-        std::cout << "Found " << packages.size() << " packages in repository " << repository.name << std::endl;
+        logger.debug("Found " + std::to_string(packages.size()) + " packages in repository " + repository.name);
 
         result.push_back(rep);
         // Save repository
@@ -226,10 +228,10 @@ std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
     struct dirent *ent;
     std::vector<Package> packagesFound;
 
-    if ((dir = opendir (APT_LISTS)) != NULL) {
+    if ((dir = opendir(APT_LISTS)) != NULL) {
         /* print all the files and directories within directory */
         while ((ent = readdir (dir)) != NULL) {
-            std::string fileName = std::string(ent->d_name);
+            std::string fileName = APT_LISTS + std::string(ent->d_name);
             if (!endsWith(fileName, "_Packages"))
                 continue;
             std::ifstream infile (fileName);
@@ -240,11 +242,14 @@ std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
             std::string line;
 
             while (std::getline(infile, line)) {
+                // Skip empty lines
+                if (line.empty()) continue;
+
                 // Check if the line starts with "Package:"
                 if (line.find("Package:") == 0) {
                     // Add package if searchTerm is found
                     if (package.name.size() > 0 && package.name.find(searchTerm) != std::string::npos) {
-                        package.baseUrl = StringUtils::replace(fileName, "_Packages", "");
+                        package.baseUrl = StringUtils::replace(std::string(ent->d_name), "_Packages", "");
                         package.baseUrl = StringUtils::replaceAll(package.baseUrl, "_", "/");
                         std::vector<std::string> parts = StringUtils::split(package.baseUrl, "/");
                         if (!parts.empty())
@@ -289,10 +294,10 @@ std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
 
 }
 
-std::vector<Package> RepositoryManager::installPackages(std::string packages) {
-    std::vector<std::string> packagesToInstall = StringUtils::split(packages, ",");
+std::vector<Package> RepositoryManager::installPackages(std::vector<std::string> packages) {
     std::vector<Package> packagesInstalled;
-    for (const auto& package : packagesToInstall) {
+    for (const auto& package : packages) {
+        logger.log("Installing '" + package + "'");
         std::vector<Package> packagesFound = searchPackages(package);
         if (!packagesFound.empty()) {
             // Get first package found - TODO - what if there are multiple files in repositories?
@@ -304,39 +309,31 @@ std::vector<Package> RepositoryManager::installPackages(std::string packages) {
             std::string outputFile = std::string(APT_PACKAGES) + filename;
             std::string outputDir = std::string(APT_TEMPDIR) + "/"  + p.filename + "/";
             // Download file
-            std::cout << "Save file to " << outputFile << std::endl;
+            if (verbose())
+                logger.debug("Save file to " + outputFile);
             if (downloadFile(url, outputFile)) {
-                std::cout << filename << " downloaded" << std::endl;
+                logger.debug(filename + " downloaded");
                 // Install file
                 ArExtractor extractor;
                 // Extract the .deb file to temporary dir
-                std::cout << "Extract " << outputFile << " to " << outputDir << ".. " << std::flush;
-                if (extractor.extract(outputFile, outputDir) == 0) {
+                logger.debug("Extract " + outputFile + " to " + outputDir + ".. ");
+                if (extractor.extract(outputFile.c_str(), outputDir.c_str())) {
                     // File is extracted. Now extract the package
-                    std::cout << "Done. \nNow extracting files.. " << std::flush;
-                    std::string commandName = "xz " + outputDir + "data.tar.xz
-                    if (system("xz -d outputDir + "data.tar.xz", APT_TEMPFILES_DIR) == 0) {
-                        std::cout << "Done. \nInstalling files.. " << std::flush;
-                        // Now the tricky part. We have to avoid to use /usr/ppc-amigaos because on OS4 we have SDK: define
-                    }
-                    else {
-                        std::cout << "Failed!" << std::endl;
-                        // remove the .deb file since it is not installed
-                        std::remove(outputFile.c_str());
-                        std::remove(outputDir.c_str());
-                    }
+                    logger.debug("Done.");
+                    p.installed = true;
                 }
                 else {
-                    std::cout << "Failed!" << std::endl;
+                    logger.error("Failed to extract " + outputFile);
                     // remove the .deb file since it is not installed
                     std::remove(outputFile.c_str());
                 }
             }
             else
-                std::cout << "Error downloading " << url << std::endl;
+                logger.error("Error downloading " + url);
+            packagesInstalled.push_back(p);
         }
         else {
-            std::cout << package << " not found" << std::endl;
+            logger.error(package + " not found");
         }
     }
 
