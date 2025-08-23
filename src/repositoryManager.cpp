@@ -2,6 +2,10 @@
 
 extern APT apt;
 
+RepositoryManager::~RepositoryManager() {
+    delete &_db;
+}
+
 bool RepositoryManager::readRepositoryFile(std::string path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -35,6 +39,8 @@ bool RepositoryManager::readRepositoryFile(std::string path) {
                 rep.name = replaceAll(repository, "https://", "");
                 rep.name = replaceAll(rep.name, "/", "_");
                 repositories.push_back(rep); // Store URL in vector
+
+                _db.insertRepository({0, rep.name, url});
             }
         }
     }
@@ -76,13 +82,14 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
     if (apt.ignorePeers())        
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0); // Skip SSL Verification
 
+    int i = 1;
     for (const auto& repository : repositories) {
         std::string line;
         Package package;
         Repository rep;
         std::string inRelease = repository.baseUrl +  "/InRelease";
         std::string packagesFile = repository.baseUrl +  "/main/binary-amd64/Packages";
-        
+        logger.log("Downloading:" + std::to_string(i) + " " + repository.baseUrl +  " InRelease");
         // Download inRelease
         curl_easy_setopt(curl, CURLOPT_URL, inRelease.c_str());
         // Perform the request
@@ -94,8 +101,10 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
             return result;
         }
         rep.packages = response.str();
+#if USE_FILES_FOR_SEARCH
         saveRepository(APT_LISTS + repository.name + "_InRelease", rep.packages);
-
+#endif
+        int repo_id = _db.insertRepository({0, repository.name, repository.baseUrl});
         response.str("");
 
         // Download Packages
@@ -113,7 +122,9 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
 
         std::istringstream stream(response.str());
         rep.packages = response.str();
+#if USE_FILES_FOR_SEARCH
         saveRepository(APT_LISTS + repository.name + "_main_binary-amd64_Packages", rep.packages);
+#endif
 
         while (std::getline(stream, line)) {
             // Skip empty lines
@@ -124,6 +135,12 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
                 // If package is not empty, add it to the vector
                 if (!package.name.empty()) {
                     packages.push_back(package);
+
+                    // Save Package on DB
+                    package.repository_id = repo_id;
+                    if (!_db.insertOrUpdatePackage(package)) {
+                        std::cerr << "Failed to insert package: " << package.name << std::endl;
+                    }
                 }
                 // Clear package object
                 package = Package();
@@ -173,12 +190,14 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
         // Add the last package
         if (!package.name.empty()) {
             packages.push_back(package);
+            // Save Package on DB
+            package.repository_id = repo_id;
+            _db.insertOrUpdatePackage(package);
         }
         logger.debug("Found " + std::to_string(packages.size()) + " packages in repository " + repository.name);
 
         result.push_back(rep);
-        // Save repository
-
+        i++;
     }
     return result;
 }
@@ -224,10 +243,11 @@ bool RepositoryManager::checkPackage(Package newPackage) {
 }
 
 std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
+    std::vector<Package> packagesFound;
+    logger.debug("Searching for packages matching: " + searchTerm);
+#if USE_FILES_FOR_SEARCH
     DIR *dir;
     struct dirent *ent;
-    std::vector<Package> packagesFound;
-
     if ((dir = opendir(APT_LISTS)) != NULL) {
         /* print all the files and directories within directory */
         while ((ent = readdir (dir)) != NULL) {
@@ -290,6 +310,10 @@ std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
         }
         closedir (dir);
     }
+#else
+    std::vector<Package> packages = _db.queryPackages(searchTerm);
+    packagesFound.insert(packagesFound.end(), packages.begin(), packages.end());
+#endif
     return packagesFound;
 
 }
@@ -303,7 +327,11 @@ std::vector<Package> RepositoryManager::installPackages(std::vector<std::string>
             // Get first package found - TODO - what if there are multiple files in repositories?
             Package p = packagesFound.front();
             // Create URL from baseUrl
+#if USE_FILES_FOR_SEARCH
             std::string url = "https://" + p.baseUrl + "/" + p.filename;
+#else
+            std::string url = p.baseUrl + p.filename;
+#endif
             // Create filename to save
             std::string filename = p.filename.substr(p.filename.find_last_of("/\\") + 1);
             std::string outputFile = std::string(APT_PACKAGES) + filename;
@@ -321,6 +349,9 @@ std::vector<Package> RepositoryManager::installPackages(std::vector<std::string>
                     // File is extracted. Now extract the package
                     logger.debug("Done.");
                     p.installed = true;
+                    
+                    // Set package as installed
+                    _db.setInstalled(p.id, true);
                 }
                 else {
                     logger.error("Failed to extract " + outputFile);

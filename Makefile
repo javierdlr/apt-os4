@@ -5,7 +5,7 @@ CC = ppc-amigaos-gcc
 OPTIMIZE = -O3 -mstrict-align
 CXXFLAGS = -std=c++17 -gstabs -mcrt=clib4 -Wall -fpermissive $(OPTIMIZE)
 CFLAGS = -gstabs -mcrt=clib4 -Wall $(OPTIMIZE)
-LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lbrotlidec -lbrotlicommon -lnghttp2 -lrtmp -lssl -lcrypto  -lpsl -lidn2 -lunistring -lpthread -larchive -llz4 -llzma -lbz2 -lz -latomic -lauto 
+LDFLAGS=-mcrt=clib4 -athread=native -lcurl -lbrotlidec -lbrotlicommon -lnghttp2 -lrtmp -lssl -lcrypto  -lpsl -lidn2 -lunistring -lpthread -larchive -llz4 -llzma -lbz2 -lz -lsqlite3 -latomic -lauto 
 
 OBJ=build/
 SRC=src/

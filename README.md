@@ -59,10 +59,15 @@ Example:
 deb https://example.com/ repo
 ```
 
+## Create deb files
+
+To create .deb files to publish to clib4 repository please refer to [clib4 repository wiki](https://github.com/AmigaLabs/clib4/wiki/Clib4-apt-packages-repository)
+
 ## Dependencies
 
 - [libcurl](https://curl.se/libcurl/)
 - [libarchive](https://www.libarchive.org/)
+- [libsqlite](https://sqlite.org/src/doc/trunk/README.md)
 - Standard C++17 libraries
 
 ## License

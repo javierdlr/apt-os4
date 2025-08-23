@@ -107,10 +107,12 @@ std::string ArExtractor::amiga_sdk_path(const std::string& extracted) {
 int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *target_dir) {
     struct archive *a = archive_read_new();
     struct archive *ext = archive_write_disk_new();
+    archive_read_support_format_empty(a);
     archive_read_support_format_tar(a);
     archive_read_support_filter_gzip(a);
     archive_read_support_filter_xz(a);
-
+    archive_read_support_filter_zstd(a);
+    
     // Set disk writer options (extract permissions, times, etc)
     archive_write_disk_set_options(ext,
         ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |

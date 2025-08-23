@@ -20,7 +20,8 @@
 
 class RepositoryManager : public StringUtils {
     public:
-        RepositoryManager(bool verbose) : _verbose(verbose) { logger.setEnabled(verbose); }
+        RepositoryManager(PackageDb& db, bool verbose) : _db(db), _verbose(verbose) { logger.setVerbose(verbose); }
+        ~RepositoryManager();
         virtual bool readRepositoryFile(std::string path);
         virtual bool saveRepository(std::string name, std::string content);
         virtual std::vector<Repository> downloadPackages();
@@ -33,6 +34,7 @@ class RepositoryManager : public StringUtils {
         bool verbose() { return _verbose; };
     private:
         Logger logger;
+        PackageDb& _db;
         std::vector<Repository> repositories;
         std::vector<Package> packages;
         bool _verbose = false;

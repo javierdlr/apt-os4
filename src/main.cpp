@@ -7,6 +7,7 @@
 #include "aptcommand.h"
 #include "stringutils.h"
 #include "repositoryManager.h"
+#include "package.h"
 
 APT apt;
 
@@ -25,41 +26,25 @@ AptCommand parse_command(const std::string& cmd) {
 
 void print_usage() {
     std::cout << "Usage:\n";
-    std::cout << "  apt install <package1> <package2> ...\n";
-    std::cout << "  apt uninstall <package1> <package2> ...\n";
-    std::cout << "  apt remove <package1> <package2> ...\n";
-    std::cout << "  apt search <package> ...\n";
-    std::cout << "  apt update\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] install <package1> <package2> ...\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] uninstall <package1> <package2> ...\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] remove <package1> <package2> ...\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] search <package> ...\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] update\n";
 }
 
 
 int main(int argc, char *argv[]) {
     int opt;
+    int optional_opts = 0;
     std::string search_term;
     std::string package_name;
     std::string filename = APT_SOURCE_LIST;
     Logger logger(false);
+    apt.verbose(false);
+    apt.ignorePeers(false);
 
-    if (argc < 2) {
-        print_usage();
-        return 1;
-    }
-
-    std::string command = argv[1];
-    AptCommand cmd = parse_command(command);
-
-    if (cmd == AptCommand::Unknown) {
-        logger.error("Unknown command: " + command);
-        print_usage();
-        return 1;
-    }
-
-    if (argc < 3) {
-        logger.error("No packages specified.");
-        print_usage();
-        return 1;
-    }
-
+    
     // Long options structure
     static struct option long_options[] = {
             {"ignorepeers", no_argument,       0, 'p'},
@@ -68,39 +53,67 @@ int main(int argc, char *argv[]) {
             {0,             0,                 0, 0}
     };
 
-    apt.verbose(false);
-    apt.ignorePeers(false);
+    if (argc < 2) {
+        print_usage();
+        return 1;
+    }
+
+    // Parse command-line options
+    while ((opt = getopt_long(argc, argv, "ab:c:", long_options, NULL)) != EOF) {
+        switch (opt) {
+            case 'p':
+                optional_opts++;
+                apt.ignorePeers(true);
+                break;
+            case 'v':
+                optional_opts++;
+                apt.verbose(true);
+                break;
+            case 'h':
+            default:
+                print_usage();
+                return 0;
+        }
+    }
+
+    std::string command = argv[optional_opts + 1];
+    AptCommand cmd = parse_command(command);
+
+    if (cmd == AptCommand::Unknown) {
+        logger.error("Unknown command: " + command);
+        print_usage();
+        return EXIT_FAILURE;
+    }
+
+    if (cmd != AptCommand::Update && argc < 3 + optional_opts) {
+        logger.error("No packages specified.");
+        print_usage();
+        return EXIT_FAILURE;
+    }
+
+    PackageDb db(APT_PACKAGES"packages.db");
+    if (!db.open()) {
+        std::cerr << "Could not open DB\n";
+        return EXIT_FAILURE;
+    }
+    if (!db.createTables()) {
+        std::cerr << "Could not create tables\n";
+        return EXIT_FAILURE;
+    }
 
     if (!apt.createDirs()) {
         exit(EXIT_FAILURE);
     }
 
-    // Parse command-line options
-    while ((opt = getopt_long(argc, argv, "v:p:h:", long_options, NULL)) != EOF) {
-        switch (opt) {
-            case 'v':
-                apt.verbose(true);
-                break;
-            case 'p':
-                apt.ignorePeers(true);
-                break;
-            case 'h':
-                print_usage();
-                return 0;
-            default:
-                error(APT_USAGE);
-        }
-    }
+    logger.setVerbose(apt.verbose());
 
-    logger.setEnabled(apt.verbose());
-
-    RepositoryManager repositoryManager(apt.verbose());
+    RepositoryManager repositoryManager(db, apt.verbose());
     if (!repositoryManager.readRepositoryFile(filename)) {
         error("Cannot find " + filename + " file");
     }
     
     std::vector<std::string> packages;
-    for (int i = 2; i < argc; ++i) {
+    for (int i = 2 + optional_opts; i < argc; ++i) {
         packages.push_back(argv[i]);
     }
 
@@ -113,7 +126,7 @@ int main(int argc, char *argv[]) {
                 logger.log("Package " + package.name + " needs to be updated");
                 packagesToUpdate.push_back(package);
             } else {
-                logger.error("Package " + package.name + " not found or already updated");
+                logger.debug("Package " + package.name + " not found or already updated");
             }
         }
         if (packagesToUpdate.size() > 0) {
@@ -128,10 +141,7 @@ int main(int argc, char *argv[]) {
                 logger.error("Package " + p.name + " not installed");
         }
     } else if (cmd == AptCommand::Search) {
-        // Perform actions based on the specified parameters
         for (const auto& package : packages) {
-            logger.debug("Searching for packages matching: " + package);
-            // Add code for search action
             std::vector <Package> packagesFound = repositoryManager.searchPackages(StringUtils::tolower(package));
             for (const auto &p: packagesFound) {
                 logger.log(p.name + "/" + p.version);

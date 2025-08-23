@@ -1,8 +1,17 @@
+#ifndef PACKAGE_H
+#define PACKAGE_H
+
 #include <string>
+#include <vector>
+
+#include <sqlite3.h>
+
+#include "logger.h"
 
 // Package class to hold package information
 class Package {
 public:
+    int id = 0;
     std::string name;
     std::string version;
     std::string architecture;
@@ -22,4 +31,65 @@ public:
 
     // Field used to check if it is installed or not
     bool installed = false;
+    bool needs_update = false;
+
+    // Foreign key to repository
+    int repository_id = 0;
 };
+
+struct RepositoryInfo {
+    int id = 0;
+    std::string name;
+    std::string url;
+};
+
+struct PackageFile {
+    int id = 0;
+    int package_id = 0;           // Foreign key to packages table
+    std::string filepath;
+};
+
+struct PackageUpdate {
+    int id = 0;
+    int package_id = 0;           // Foreign key to packages table
+    std::string package_name;
+    std::string old_version;
+    std::string new_version;
+    std::string update_time; // ISO8601 timestamp
+};
+
+class PackageDb {
+public:
+    PackageDb(const std::string& dbfile, bool verbose = false) : dbfile_(dbfile), db_(nullptr) { logger.setVerbose(verbose); }
+    ~PackageDb();
+
+    bool open();
+    void close();
+    bool createTables();
+    bool insertPackage(const Package& pkg);
+    bool insertOrUpdatePackage(const Package& pkg);
+    std::vector<Package> queryPackages(const std::string& name = "");
+    bool setInstalled(int id, bool installed);
+    int insertRepository(const RepositoryInfo& repo);
+    std::vector<RepositoryInfo> queryRepositories();
+    RepositoryInfo queryRepository(int id);
+
+    // Package file handling
+    bool insertPackageFile(int package_id, const std::string& filepath);
+    bool insertPackageFiles(int package_id, const std::vector<std::string>& filepaths);
+    std::vector<PackageFile> queryPackageFiles(int package_id);
+    bool removePackageFiles(int package_id);
+
+    bool insertPackageUpdate(const PackageUpdate& update);
+    bool deletePackageUpdate(int update_id);
+    std::vector<PackageUpdate> queryPackageUpdates(int package_id);
+private:
+    bool isNewerVersion(const std::string& newVersion, const std::string& oldVersion);
+    std::vector<int> splitVersion(const std::string& version);
+    std::string dbfile_;
+    sqlite3* db_;
+    std::string getCurrentTimestamp();
+    Logger logger;
+};
+
+#endif // PACKAGE_H
