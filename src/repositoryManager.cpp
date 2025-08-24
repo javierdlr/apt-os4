@@ -1,9 +1,7 @@
 #include "repositoryManager.h"
 
-extern APT apt;
-
 RepositoryManager::~RepositoryManager() {
-    delete &_db;
+    _db.close();
 }
 
 bool RepositoryManager::readRepositoryFile(std::string path) {
@@ -38,7 +36,7 @@ bool RepositoryManager::readRepositoryFile(std::string path) {
                 rep.baseUrl = repository;
                 rep.name = replaceAll(repository, "https://", "");
                 rep.name = replaceAll(rep.name, "/", "_");
-                repositories.push_back(rep); // Store URL in vector
+                _repositories.push_back(rep); // Store URL in vector
 
                 _db.insertRepository({0, rep.name, url});
             }
@@ -67,7 +65,7 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
 
     CURL* curl = curl_easy_init();
     if (!curl) {
-        std::cerr << "Error initializing libcurl." << std::endl;
+        _logger.error("Error initializing libcurl.");
         return result;
     }
 
@@ -79,24 +77,24 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
 
     if (getenv("CURL_VERBOSE") != NULL)
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-    if (apt.ignorePeers())        
+    if (_ignorePeers)        
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0); // Skip SSL Verification
 
     int i = 1;
-    for (const auto& repository : repositories) {
+    for (const auto& repository : _repositories) {
         std::string line;
         Package package;
         Repository rep;
         std::string inRelease = repository.baseUrl +  "/InRelease";
         std::string packagesFile = repository.baseUrl +  "/main/binary-amd64/Packages";
-        logger.log("Downloading:" + std::to_string(i) + " " + repository.baseUrl +  " InRelease");
+        _logger.log("Downloading:" + std::to_string(i) + " " + repository.baseUrl +  " InRelease");
         // Download inRelease
         curl_easy_setopt(curl, CURLOPT_URL, inRelease.c_str());
         // Perform the request
         CURLcode res = curl_easy_perform(curl);
         // Check for errors
         if (res != CURLE_OK) {
-            std::cerr << "Failed to download InRelease file: " << curl_easy_strerror(res) << std::endl;
+            _logger.error("Failed to download InRelease file: " + std::string(curl_easy_strerror(res)));
             curl_easy_cleanup(curl);
             return result;
         }
@@ -115,7 +113,7 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
 
         // Check for errors
         if (res != CURLE_OK) {
-            std::cerr << "Failed to download: " << curl_easy_strerror(res) << std::endl;
+            _logger.error("Failed to download: " + std::string(curl_easy_strerror(res)));
             curl_easy_cleanup(curl);
             return result;
         }
@@ -134,7 +132,7 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
             if (line.find("Package:") == 0) {
                 // If package is not empty, add it to the vector
                 if (!package.name.empty()) {
-                    packages.push_back(package);
+                    _packages.push_back(package);
 
                     // Save Package on DB
                     package.repository_id = repo_id;
@@ -189,12 +187,14 @@ std::vector<Repository> RepositoryManager::downloadPackages() {
 
         // Add the last package
         if (!package.name.empty()) {
-            packages.push_back(package);
+            _packages.push_back(package);
             // Save Package on DB
             package.repository_id = repo_id;
-            _db.insertOrUpdatePackage(package);
+            if (!_db.insertOrUpdatePackage(package)) {
+                _logger.error("Failed to insert package: " + package.name);
+            }
         }
-        logger.debug("Found " + std::to_string(packages.size()) + " packages in repository " + repository.name);
+        _logger.debug("Found " + std::to_string(_packages.size()) + " packages in repository " + repository.name);
 
         result.push_back(rep);
         i++;
@@ -244,7 +244,7 @@ bool RepositoryManager::checkPackage(Package newPackage) {
 
 std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
     std::vector<Package> packagesFound;
-    logger.debug("Searching for packages matching: " + searchTerm);
+    _logger.debug("Searching for packages matching: " + searchTerm);
 #if USE_FILES_FOR_SEARCH
     DIR *dir;
     struct dirent *ent;
@@ -318,14 +318,96 @@ std::vector<Package> RepositoryManager::searchPackages(std::string searchTerm) {
 
 }
 
+void RepositoryManager::upgradeAllPackages() {
+    // Find all packages needing update
+    std::vector<Package> pkgs = _db.queryPackagesNeedingUpdate(); // needs_update = 1
+
+    for (const auto& pkg : pkgs) {
+        // Get all files for this package
+        std::vector<PackageFile> files = _db.queryPackageFiles(pkg.id);
+
+        // Delete files physically
+        for (const auto& file : files) {
+            try {
+                if (fs::is_regular_file(file.filepath)) fs::remove(file.filepath);
+            } catch (const std::exception& e) {
+                _logger.error("Failed to delete file: " + file.filepath + " (" + e.what() + ")");
+            }
+        }
+
+        // Delete package_files entries
+        _db.deletePackageFiles(pkg.id);
+
+        std::vector<std::string> toInstall;
+        toInstall.push_back(pkg.name);
+        std::vector<Package> installedPackages = installPackages(toInstall);
+        if (installedPackages.empty() || !installedPackages.front().installed) {
+            _db.setInstalled(pkg.id, false);
+            _db.setPackageNeedsUpdate(pkg.id, false);
+            _logger.error("Failed to upgrade package " + pkg.name + ". Try to reinstall it.");
+            continue;
+        }
+
+        _db.deletePackageUpdate(pkg.id);
+
+        // Set needs_update = 0
+        _db.setPackageNeedsUpdate(pkg.id, false);
+        _logger.log("Package " + pkg.name + " upgraded to version " + pkg.version);
+    }
+}
+
+std::vector<Package> RepositoryManager::removePackages(std::vector<std::string> packages) {
+    std::vector<Package> packagesRemoved;
+    for (const auto& package : packages) {
+        _logger.log("Uninstalling '" + package + "'");
+        std::vector<Package> packagesFound = searchPackages(package);
+        if (!packagesFound.empty()) {
+            for (const auto& pkg : packagesFound) {
+
+                // Get all files for this package
+                std::vector<PackageFile> files = _db.queryPackageFiles(pkg.id);
+
+                // Delete files physically
+                for (const auto& file : files) {
+                    try {
+                        if (fs::is_regular_file(file.filepath)) fs::remove(file.filepath);
+                    } catch (const std::exception& e) {
+                        _logger.error("Failed to delete file: " + file.filepath + " (" + e.what() + ")");
+                    }
+                }
+
+                // Delete package_files entries
+                _db.deletePackageFiles(pkg.id);
+
+                _db.deletePackageUpdate(pkg.id);
+
+                _db.setInstalled(pkg.id, false);
+
+                std::string filename = pkg.filename.substr(pkg.filename.find_last_of("/\\") + 1);
+                if (fs::is_regular_file(APT_PACKAGES + filename)) {
+                    _logger.debug("Removing file " + std::string(APT_PACKAGES) + filename);
+                    fs::remove(APT_PACKAGES + filename);
+                }
+                packagesRemoved.push_back(pkg);
+            }
+        }
+    }
+    return packagesRemoved;
+}
+
 std::vector<Package> RepositoryManager::installPackages(std::vector<std::string> packages) {
     std::vector<Package> packagesInstalled;
     for (const auto& package : packages) {
-        logger.log("Installing '" + package + "'");
+        _logger.log("Installing '" + package + "'");
         std::vector<Package> packagesFound = searchPackages(package);
         if (!packagesFound.empty()) {
             // Get first package found - TODO - what if there are multiple files in repositories?
             Package p = packagesFound.front();
+            if (p.installed && !p.needs_update) {
+                _logger.log("Package '" + package + "' version " + p.version + " is already installed.");
+                continue;
+            }
+
             // Create URL from baseUrl
 #if USE_FILES_FOR_SEARCH
             std::string url = "https://" + p.baseUrl + "/" + p.filename;
@@ -337,34 +419,37 @@ std::vector<Package> RepositoryManager::installPackages(std::vector<std::string>
             std::string outputFile = std::string(APT_PACKAGES) + filename;
             std::string outputDir = std::string(APT_TEMPDIR) + "/"  + p.filename + "/";
             // Download file
-            if (verbose())
-                logger.debug("Save file to " + outputFile);
+            if (_verbose)
+                _logger.debug("Save file to " + outputFile);
             if (downloadFile(url, outputFile)) {
-                logger.debug(filename + " downloaded");
+                _logger.debug(filename + " downloaded");
                 // Install file
                 ArExtractor extractor;
+                std::vector<std::string> extracted_files;
                 // Extract the .deb file to temporary dir
-                logger.debug("Extract " + outputFile + " to " + outputDir + ".. ");
-                if (extractor.extract(outputFile.c_str(), outputDir.c_str())) {
-                    // File is extracted. Now extract the package
-                    logger.debug("Done.");
+                _logger.debug("Extract " + outputFile + " to " + outputDir + ".. ");
+                if (extractor.extract(outputFile.c_str(), outputDir.c_str(), extracted_files)) {
+                    // File is extracted. Now insert extracted files into db
+                    _db.insertPackageFiles(p.id, extracted_files);
+
+                    _logger.debug("Done.");
                     p.installed = true;
                     
                     // Set package as installed
                     _db.setInstalled(p.id, true);
                 }
                 else {
-                    logger.error("Failed to extract " + outputFile);
+                    _logger.error("Failed to extract " + outputFile);
                     // remove the .deb file since it is not installed
                     std::remove(outputFile.c_str());
                 }
             }
             else
-                logger.error("Error downloading " + url);
+                _logger.error("Error downloading " + url);
             packagesInstalled.push_back(p);
         }
         else {
-            logger.error(package + " not found");
+            _logger.error(package + " not found");
         }
     }
 
@@ -382,7 +467,7 @@ bool RepositoryManager::downloadFile(const std::string& url, const std::string& 
 
     if (getenv("CURL_VERBOSE") != NULL)
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-    if (apt.ignorePeers())
+    if (_ignorePeers)
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0); // Skip SSL Verification
 
     // Open the output file

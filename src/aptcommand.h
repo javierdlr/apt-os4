@@ -10,6 +10,8 @@ enum class AptCommand {
     Uninstall,
     Search,
     Update,
+    Upgrade,
+    List,
     Unknown
 };
 

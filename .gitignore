@@ -54,3 +54,5 @@ build/
 
 .idea
 .vscode
+apt
+apt.lha

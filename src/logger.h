@@ -6,13 +6,13 @@
 
 class Logger {
 public:
-    explicit Logger(bool verbose = true) : verbose_(verbose) {}
+    explicit Logger(bool verbose = true) : _verbose(verbose) {}
 
-    void setVerbose(bool enabled) { verbose_ = enabled; }
-    bool isVerbose() const { return verbose_; }
+    void setVerbose(bool enabled) { _verbose = enabled; }
+    bool isVerbose() const { return _verbose; }
 
     void debug(const std::string& msg) const {
-        if (verbose_) {
+        if (_verbose) {
             std::cout << msg << std::endl;
         }
     }
@@ -28,14 +28,14 @@ public:
     // Optional: log with formatting (like printf)
     template<typename... Args>
     void logf(const std::string& fmt, Args... args) const {
-        if (verbose_) {
+        if (_verbose) {
             printf(fmt.c_str(), args...);
             printf("\n");
         }
     }
 
 private:
-    bool verbose_;
+    bool _verbose;
 };
 
 #endif // LOGGER_H

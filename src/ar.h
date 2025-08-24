@@ -7,6 +7,7 @@
 #include <filesystem>
 
 #include "logger.h"
+#include "package.h"
 
 namespace fs = std::filesystem;
 
@@ -14,10 +15,11 @@ namespace fs = std::filesystem;
 
 class ArExtractor {
     public:
-        bool extract(const std::string& filename, const std::string& outputDir);
+        bool extract(const std::string& filename, const std::string& outputDir, std::vector<std::string>& extracted_files);
     private:
-        Logger logger_;
-        int extract_tarball(const void *buffer, size_t size, const char *target_dir);
+        Logger _logger;
+
+        int extract_tarball(const void *buffer, size_t size, const char *target_dir, std::vector<std::string>& extracted_files);
         std::string amiga_sdk_path(const std::string& extracted);
         std::string clean_path(const std::string& path);
         bool safe_rename(const fs::path& src, const fs::path& dest);

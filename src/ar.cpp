@@ -4,8 +4,12 @@
 
 bool ArExtractor::copy_file(const fs::path& source, const fs::path& destination)
 {
-    if (access(source.c_str(), F_OK) == -1) {
+    if (!fs::exists(source)) {
         return false;
+    }
+
+    if (fs::exists(destination)) {
+        fs::remove(destination);
     }
 
     char* buffer = (char *) malloc(BUFFER_SIZE);
@@ -36,7 +40,7 @@ bool ArExtractor::copy_file(const fs::path& source, const fs::path& destination)
                 close(fd_from);
                 close(fd_to);
                 free(buffer);
-                unlink(destination.c_str());
+                fs::remove(destination);
                 return false;
             }
         } else {
@@ -70,7 +74,7 @@ bool ArExtractor::safe_rename(const fs::path& src, const fs::path& dest) {
         return true;
     }
 	else {
-		std::cerr << "Failed to move " << src << " -> " << dest << std::endl;
+		_logger.error("Failed to move " + src.string() + " -> " + dest.string());
 	}
     return false;
 }
@@ -104,7 +108,7 @@ std::string ArExtractor::amiga_sdk_path(const std::string& extracted) {
 }
 
 // Helper to extract a tarball (data.tar.gz or data.tar.xz) from memory
-int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *target_dir) {
+int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *target_dir, std::vector<std::string>& extracted_files) {
     struct archive *a = archive_read_new();
     struct archive *ext = archive_write_disk_new();
     archive_read_support_format_empty(a);
@@ -112,7 +116,7 @@ int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *ta
     archive_read_support_filter_gzip(a);
     archive_read_support_filter_xz(a);
     archive_read_support_filter_zstd(a);
-    
+
     // Set disk writer options (extract permissions, times, etc)
     archive_write_disk_set_options(ext,
         ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
@@ -120,7 +124,7 @@ int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *ta
         ARCHIVE_EXTRACT_SECURE_NODOTDOT);
 
     if (archive_read_open_memory(a, buffer, size) != ARCHIVE_OK) {
-        std::cerr << "Failed to open tarball from memory: " << archive_error_string(a) << std::endl;
+        _logger.error("Failed to open tarball from memory: " + std::string(archive_error_string(a)));
         archive_read_free(a);
         archive_write_free(ext);
         return 1;
@@ -146,7 +150,14 @@ int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *ta
 		std::string amiga_path = amiga_sdk_path(new_path);
 		if (!amiga_path.empty()) {
 			std::string cleaned_path = clean_path(new_path);
-			safe_rename(cleaned_path.c_str(), amiga_path.c_str());
+            if (fs::is_regular_file(cleaned_path)) {
+				if (!safe_rename(cleaned_path.c_str(), amiga_path.c_str())) {
+					_logger.error("Failed to move " + cleaned_path + " to " + amiga_path);
+				}
+				else {
+					extracted_files.push_back(amiga_path);
+				}
+			}
 		}
     }
 
@@ -155,11 +166,11 @@ int ArExtractor::extract_tarball(const void *buffer, size_t size, const char *ta
     return 0;
 }
 
-bool ArExtractor::extract(const std::string& filename, const std::string& outputDir) {
+bool ArExtractor::extract(const std::string& filename, const std::string& outputDir, std::vector<std::string>& extracted_files) {
 	struct archive *a = archive_read_new();
     archive_read_support_format_ar(a);
     if (archive_read_open_filename(a, filename.c_str(), 10240) != ARCHIVE_OK) {
-        std::cerr << "Could not open deb file: " << archive_error_string(a) << std::endl;
+        _logger.error("Could not open deb file: " + std::string(archive_error_string(a)));
         archive_read_free(a);
         return false;
     }
@@ -173,14 +184,14 @@ bool ArExtractor::extract(const std::string& filename, const std::string& output
             size_t size = archive_entry_size(entry);
             void *buffer = malloc(size);
             if (!buffer) {
-                std::cerr << "Memory allocation failed" << std::endl;
+                _logger.error("Memory allocation failed");
                 archive_read_free(a);
                 return false;
             }
             archive_read_data(a, buffer, size);
 
             // Extract the embedded tarball
-            extract_tarball(buffer, size, outputDir.c_str());
+            extract_tarball(buffer, size, outputDir.c_str(), extracted_files);
             free(buffer);
         } else {
             // Skip other entries

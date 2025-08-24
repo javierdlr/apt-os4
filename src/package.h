@@ -60,12 +60,15 @@ struct PackageUpdate {
 
 class PackageDb {
 public:
-    PackageDb(const std::string& dbfile, bool verbose = false) : dbfile_(dbfile), db_(nullptr) { logger.setVerbose(verbose); }
+    PackageDb(const std::string& dbfile, bool verbose = false) : _dbfile(dbfile), _db(nullptr) { _logger.setVerbose(verbose); }
     ~PackageDb();
 
+    // DB Handling
     bool open();
     void close();
     bool createTables();
+
+    // Package Handling
     bool insertPackage(const Package& pkg);
     bool insertOrUpdatePackage(const Package& pkg);
     std::vector<Package> queryPackages(const std::string& name = "");
@@ -79,17 +82,21 @@ public:
     bool insertPackageFiles(int package_id, const std::vector<std::string>& filepaths);
     std::vector<PackageFile> queryPackageFiles(int package_id);
     bool removePackageFiles(int package_id);
-
+    std::vector<Package> queryPackagesNeedingUpdate();
+    bool deletePackageFiles(int package_id);
+    bool setPackageNeedsUpdate(int package_id, bool needs_update);
     bool insertPackageUpdate(const PackageUpdate& update);
     bool deletePackageUpdate(int update_id);
     std::vector<PackageUpdate> queryPackageUpdates(int package_id);
 private:
+    std::string _dbfile;
+    sqlite3* _db;
+    Logger _logger;
+
     bool isNewerVersion(const std::string& newVersion, const std::string& oldVersion);
     std::vector<int> splitVersion(const std::string& version);
-    std::string dbfile_;
-    sqlite3* db_;
     std::string getCurrentTimestamp();
-    Logger logger;
+    bool execSQL(const char* sql, const std::string& context);
 };
 
 #endif // PACKAGE_H

@@ -12,11 +12,13 @@
 #define APT_PACKAGES "APT:packages/"
 #define APT_SOURCE_LIST "APT:sources.list"
 #define SDK_DIR "SDK:"
+#define VERSION "0.1"
 
 #define APT_USAGE "Usage: apt [--update|--search <term>|--install <package>|--remove <package>|--verbose|--ignorepeers|--help]"
 
 class APT {
     public:
+        APT(bool verbose = false, bool ignorepeers = false) : _verbose(verbose), _ignorepeers(ignorepeers) {}
         bool createDirs();
 
         bool verbose() { return _verbose; };

@@ -31,13 +31,23 @@ The resulting binary will be placed in the `build` directory.
 
 ## Usage
 
+Assign `APT:` where you want all apt data will be saved (an installer is planned).  
+Execute `apt update` to create the package list  
+
+Use following commands:  
+
 ```sh
 apt install <package1> <package2> ...
 apt uninstall <package1> <package2> ...
 apt remove <package1> <package2> ...
 apt search <package> ...
+apt list
 apt update
+apt upgrade
 ```
+
+to manage packages.
+
 
 ### Options
 

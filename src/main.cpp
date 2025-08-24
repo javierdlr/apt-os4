@@ -9,7 +9,8 @@
 #include "repositoryManager.h"
 #include "package.h"
 
-APT apt;
+static const char __attribute__((used)) *_version = "\0$VER: apt for clib4 repository. Version " VERSION " (" __DATE__ ")";
+
 
 static void error(std::string error) {
     std::cerr << error << std::endl;
@@ -21,6 +22,8 @@ AptCommand parse_command(const std::string& cmd) {
     if (cmd == "uninstall" || cmd == "remove") return AptCommand::Uninstall;
     if (cmd == "search") return AptCommand::Search;
     if (cmd == "update") return AptCommand::Update;
+    if (cmd == "upgrade") return AptCommand::Upgrade;
+    if (cmd == "list") return AptCommand::List;
     return AptCommand::Unknown;
 }
 
@@ -31,6 +34,8 @@ void print_usage() {
     std::cout << "  apt [--verbose] [--ignorepeers] remove <package1> <package2> ...\n";
     std::cout << "  apt [--verbose] [--ignorepeers] search <package> ...\n";
     std::cout << "  apt [--verbose] [--ignorepeers] update\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] upgrade\n";
+    std::cout << "  apt [--verbose] [--ignorepeers] list\n";
 }
 
 
@@ -41,10 +46,8 @@ int main(int argc, char *argv[]) {
     std::string package_name;
     std::string filename = APT_SOURCE_LIST;
     Logger logger(false);
-    apt.verbose(false);
-    apt.ignorePeers(false);
+    APT apt;
 
-    
     // Long options structure
     static struct option long_options[] = {
             {"ignorepeers", no_argument,       0, 'p'},
@@ -85,7 +88,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    if (cmd != AptCommand::Update && argc < 3 + optional_opts) {
+    if ((cmd != AptCommand::Update && cmd != AptCommand::Upgrade && cmd != AptCommand::List) && argc < 3 + optional_opts) {
         logger.error("No packages specified.");
         print_usage();
         return EXIT_FAILURE;
@@ -107,7 +110,7 @@ int main(int argc, char *argv[]) {
 
     logger.setVerbose(apt.verbose());
 
-    RepositoryManager repositoryManager(db, apt.verbose());
+    RepositoryManager repositoryManager(db, apt.verbose(), apt.ignorePeers());
     if (!repositoryManager.readRepositoryFile(filename)) {
         error("Cannot find " + filename + " file");
     }
@@ -117,7 +120,16 @@ int main(int argc, char *argv[]) {
         packages.push_back(argv[i]);
     }
 
+    if (cmd == AptCommand::List) {
+        std::vector<Package> installedPackages = db.queryPackages();
+        for (const auto& p : installedPackages) {
+            logger.log(p.name + "/" + p.version + (p.installed ? " (installed)" : "") + (p.needs_update ? " *" : ""));
+            logger.log("\t" + p.description + "\n");
+        }
+        return 0;
+    }
     if (cmd == AptCommand::Update) {
+        // Download new packages from repository
         std::vector <Repository> repository = repositoryManager.downloadPackages();
         std::vector <Package> packagesToUpdate;
         // Check packages to update (if any)
@@ -128,9 +140,6 @@ int main(int argc, char *argv[]) {
             } else {
                 logger.debug("Package " + package.name + " not found or already updated");
             }
-        }
-        if (packagesToUpdate.size() > 0) {
-            // Update packages
         }
     } else if (cmd == AptCommand::Install) {
         std::vector<Package> installedPackages = repositoryManager.installPackages(packages);
@@ -150,9 +159,13 @@ int main(int argc, char *argv[]) {
         }
     }
     else if (cmd == AptCommand::Uninstall) {
-        std::string packagesToRemove = package_name.erase(package_name.find_last_not_of(" \n\r\t") + 1);
-        logger.log("Removing '" + packagesToRemove + "'");
-        // Add code for uninstall action
+        std::vector<Package> removedPackages = repositoryManager.removePackages(packages);
+        for (const auto& p : removedPackages) {
+            logger.log("Package " + p.name + " removed");
+        }
+    }
+    else if (cmd == AptCommand::Upgrade) {
+        repositoryManager.upgradeAllPackages();
     }
 
     return 0;
