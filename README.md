@@ -1,12 +1,12 @@
 # apt-os4
 
-`apt-os4` is a package manager for AmigaOS 4, inspired by Debian's `apt`. It allows users to search, install, update, and remove software packages from remote repositories using a command-line interface.
+`apt-os4` is a package manager for AmigaOS 4, inspired by Debian's `apt`. It allows users to search, install, update, and remove clib4 library packages from its repository using a command-line interface.
 
 ## Features
 
 - Download and parse repository metadata (`InRelease`, `Packages` files)
 - Search for packages by name or description
-- Install packages (`.deb` files) and extract their contents
+- Install packages (`.deb` files) and extract their contents into SDK: folder on AmigaOS4
 - Update local package lists and check for updates
 - Remove installed packages
 - Supports options for verbose output and ignoring SSL peer verification

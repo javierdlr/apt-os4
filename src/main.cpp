@@ -94,6 +94,12 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    logger.setVerbose(apt.verbose());
+
+    if (!apt.createDirs()) {
+        exit(EXIT_FAILURE);
+    }
+
     PackageDb db(APT_PACKAGES"packages.db");
     if (!db.open()) {
         std::cerr << "Could not open DB\n";
@@ -103,12 +109,6 @@ int main(int argc, char *argv[]) {
         std::cerr << "Could not create tables\n";
         return EXIT_FAILURE;
     }
-
-    if (!apt.createDirs()) {
-        exit(EXIT_FAILURE);
-    }
-
-    logger.setVerbose(apt.verbose());
 
     RepositoryManager repositoryManager(db, apt.verbose(), apt.ignorePeers());
     if (!repositoryManager.readRepositoryFile(filename)) {
