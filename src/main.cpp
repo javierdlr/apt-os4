@@ -122,9 +122,14 @@ int main(int argc, char *argv[]) {
 
     if (cmd == AptCommand::List) {
         std::vector<Package> installedPackages = db.queryPackages();
+        size_t i = 1;
         for (const auto& p : installedPackages) {
             logger.log(p.name + "/" + p.version + (p.installed ? " (installed)" : "") + (p.needs_update ? " *" : ""));
-            logger.log("\t" + p.description + "\n");
+            logger.log("\t" + p.description);
+            if (i < installedPackages.size()) {
+                logger.log("");
+            }
+            i++;
         }
         return 0;
     }
@@ -152,9 +157,14 @@ int main(int argc, char *argv[]) {
     } else if (cmd == AptCommand::Search) {
         for (const auto& package : packages) {
             std::vector <Package> packagesFound = repositoryManager.searchPackages(StringUtils::tolower(package));
+            size_t i = 1;
             for (const auto &p: packagesFound) {
-                logger.log(p.name + "/" + p.version);
+                logger.log(p.name + "/" + p.version + (p.installed ? " (installed)" : "") + (p.needs_update ? " *" : ""));
                 logger.log("\t" + p.description);
+                if (i < packagesFound.size()) {
+                    logger.log("");
+                }
+                i++;
             }
         }
     }

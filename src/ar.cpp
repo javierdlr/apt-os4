@@ -93,11 +93,16 @@ std::string ArExtractor::clean_path(const std::string& path) {
 // Helper: transform extracted path to Amiga SDK format
 std::string ArExtractor::amiga_sdk_path(const std::string& extracted) {
 	// Replace //.
-	// Find "/SDK/local/"
+	// Find "/SDK/local/" and "/SDK/"
     size_t sdk_pos = extracted.find("/SDK/local/");
-    if (sdk_pos == std::string::npos) return "";
+    if (sdk_pos == std::string::npos) {
+        sdk_pos = extracted.find("/SDK/");
+        if (sdk_pos == std::string::npos) {
+            return "";
+        }
+    }
 
-    // Start from "SDK/local/"
+    // Start from "SDK/local/" or "SDK/"
     std::string subpath = extracted.substr(sdk_pos + 1); // skip the first '/'
     // Replace first '/' with ':'
     size_t colon_pos = subpath.find('/');
