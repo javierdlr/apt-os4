@@ -12,7 +12,7 @@
 #define APT_PACKAGES "APT:packages/"
 #define APT_SOURCE_LIST "APT:sources.list"
 #define SDK_DIR "SDK:"
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 #define APT_USAGE "Usage: apt [--update|--search <term>|--install <package>|--remove <package>|--verbose|--ignorepeers|--help]"
 
